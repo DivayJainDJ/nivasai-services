@@ -1,0 +1,83 @@
+{
+  "functions": {
+    "source": "functions",
+    "codebase": "nivasai-services",
+    "runtime": "nodejs20",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "*.local"
+    ],
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run lint",
+      "npm --prefix \"$RESOURCE_DIR\" run build"
+    ],
+    "env": [
+      {
+        "variable": "GEMINI_API_KEY",
+        "project": "nivasai-app",
+        "value": "$GEMINI_API_KEY"
+      },
+      {
+        "variable": "GOOGLE_MAPS_KEY",
+        "project": "nivasai-app",
+        "value": "$GOOGLE_MAPS_KEY"
+      },
+      {
+        "variable": "TWILIO_ACCOUNT_SID",
+        "project": "nivasai-app",
+        "value": "$TWILIO_ACCOUNT_SID"
+      },
+      {
+        "variable": "TWILIO_AUTH_TOKEN",
+        "project": "nivasai-app",
+        "value": "$TWILIO_AUTH_TOKEN"
+      },
+      {
+        "variable": "TWILIO_WHATSAPP_NUMBER",
+        "project": "nivasai-app",
+        "value": "$TWILIO_WHATSAPP_NUMBER"
+      },
+      {
+        "variable": "DOCUMENT_AI_PROJECT_ID",
+        "project": "nivasai-app",
+        "value": "$DOCUMENT_AI_PROJECT_ID"
+      },
+      {
+        "variable": "DOCUMENT_AI_LOCATION",
+        "project": "nivasai-app",
+        "value": "$DOCUMENT_AI_LOCATION"
+      },
+      {
+        "variable": "DOCUMENT_AI_PROCESSOR_ID",
+        "project": "nivasai-app",
+        "value": "$DOCUMENT_AI_PROCESSOR_ID"
+      },
+      {
+        "variable": "BIGQUERY_DATASET",
+        "project": "nivasai-app",
+        "value": "$BIGQUERY_DATASET"
+      }
+    ]
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "pubsub": {
+      "port": 8085
+    },
+    "storage": {
+      "port": 9199
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
+  }
+}
