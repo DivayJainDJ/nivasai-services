@@ -1,32 +1,55 @@
-"""
-Gemini API client initialization and configuration.
+"""Centralized Gemini client/model bootstrap."""
 
-Provides centralized, reusable model instance for all AI services.
-"""
+from __future__ import annotations
 
 import google.generativeai as genai
 
 from app.config import settings
 
 
-def initialize_gemini_client() -> genai.GenerativeModel:
-    """
-    Initialize and configure Gemini client.
+def _resolve_model_name() -> str:
+    preferred = settings.GEMINI_MODEL.strip()
+    if preferred in {"gemini-1.5-pro", "models/gemini-1.5-pro"}:
+        preferred = "gemini-1.5-pro-latest"
 
-    Returns:
-        Configured GenerativeModel instance
-    """
+    candidates = [preferred, "models/gemini-1.5-pro-latest", "gemini-1.5-pro-latest", "models/gemini-1.5-pro"]
+
+    try:
+        available = list(genai.list_models())
+    except Exception:
+        return preferred
+
+    supported = {
+        m.name
+        for m in available
+        if "generateContent" in getattr(m, "supported_generation_methods", [])
+    }
+
+    for candidate in candidates:
+        candidate_with_prefix = candidate if candidate.startswith("models/") else f"models/{candidate}"
+        if candidate in supported:
+            return candidate
+        if candidate_with_prefix in supported:
+            return candidate_with_prefix
+
+    for model_name in supported:
+        if "gemini-1.5-pro" in model_name:
+            return model_name
+
+    return preferred
+
+
+def _build_model() -> genai.GenerativeModel:
     genai.configure(api_key=settings.GEMINI_API_KEY)
+    model_name = _resolve_model_name()
     return genai.GenerativeModel(
-        model_name=settings.GEMINI_MODEL,
+        model_name=model_name,
         generation_config={
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 2048,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "max_output_tokens": 1024,
         },
     )
 
 
-# Global model instance - reusable across all services
-model = initialize_gemini_client()
+model = _build_model()

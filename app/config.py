@@ -1,72 +1,53 @@
-"""
-Application configuration for NivasAI.
+"""Centralized configuration and environment loading."""
 
-Centralized settings management using environment variables.
-"""
+from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 
-# Load environment variables
-env_path = Path(__file__).parent.parent / ".env"
-load_dotenv(env_path)
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_ENV_PATH = _BASE_DIR / ".env"
+load_dotenv(_ENV_PATH)
 
 
+@dataclass(frozen=True)
 class Settings:
     """Application settings loaded from environment variables."""
 
-    # Gemini AI Configuration
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
+    GEMINI_API_KEY: str
+    FIREBASE_STORAGE_BUCKET: str
     GEMINI_MODEL: str = "gemini-1.5-pro"
-
-    # Firebase Configuration
-    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "nivasai-dev")
-    FIRESTORE_COLLECTION_PREFIX: str = "nivasai"
-
-    # Maps Configuration
-    GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY")
-
-    # Twilio Configuration
-    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN")
-    TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER")
-
-    # Document AI Configuration
-    DOCUMENT_AI_PROJECT_ID: str = os.getenv("DOCUMENT_AI_PROJECT_ID")
-    DOCUMENT_AI_LOCATION: str = os.getenv("DOCUMENT_AI_LOCATION", "us")
-    DOCUMENT_AI_PROCESSOR_ID: str = os.getenv("DOCUMENT_AI_PROCESSOR_ID")
-
-    # BigQuery Configuration
-    BIGQUERY_PROJECT_ID: str = os.getenv("BIGQUERY_PROJECT_ID")
-    BIGQUERY_DATASET: str = os.getenv("BIGQUERY_DATASET", "nivasai_analytics")
-
-    # Cloud Storage Configuration
-    CLOUD_STORAGE_BUCKET: str = os.getenv("CLOUD_STORAGE_BUCKET")
-
-    # Application Settings
-    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-
-    def __init__(self):
-        """Initialize settings and validate required configuration."""
-        required_keys = ["GEMINI_API_KEY"]
-        missing_keys = [key for key in required_keys if not getattr(self, key, None)]
-        
-        if missing_keys:
-            raise ValueError(
-                f"Missing required environment variables: {', '.join(missing_keys)}"
-            )
-
-    def __repr__(self):
-        """Safe representation of settings without exposing secrets."""
-        return (
-            f"Settings(DEBUG={self.DEBUG}, LOG_LEVEL={self.LOG_LEVEL}, "
-            f"GEMINI_MODEL={self.GEMINI_MODEL}, FIREBASE_PROJECT={self.FIREBASE_PROJECT_ID})"
-        )
+    DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
 
 
-# Global settings instance
-settings = Settings()
+def _read_required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _read_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_settings() -> Settings:
+    """Build and validate settings once at startup."""
+    return Settings(
+        GEMINI_API_KEY=_read_required_env("GEMINI_API_KEY"),
+        FIREBASE_STORAGE_BUCKET=_read_required_env("FIREBASE_STORAGE_BUCKET"),
+        GEMINI_MODEL=os.getenv("GEMINI_MODEL", "gemini-1.5-pro").strip() or "gemini-1.5-pro",
+        DEBUG=_read_bool_env("DEBUG", False),
+        LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO").strip() or "INFO",
+    )
+
+
+settings = load_settings()

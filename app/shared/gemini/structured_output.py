@@ -1,99 +1,52 @@
-"""
-Structured output generation engine.
+"""Generic typed structured output pipeline for Gemini."""
 
-Core orchestrator that ties together Gemini, retry logic, and validation.
-"""
+from __future__ import annotations
 
-from typing import Type, TypeVar, Generic
+from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
+from tenacity import RetryError
 
 from app.shared.gemini.client import model
-from app.shared.gemini.parser import parse_gemini_response, ParsingError
-from app.shared.retry.retry_engine import retry_on_malformed_json, RetryConfig
+from app.shared.gemini.parser import GeminiParsingError, extract_response_text, parse_gemini_response_to_dict
+from app.shared.retry.retry_engine import (
+    RetryableGeminiError,
+    RetryableParseError,
+    with_exponential_retry,
+)
 
-T = TypeVar("T", bound=BaseModel)
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 
 class StructuredOutputError(Exception):
-    """Raised when structured output generation fails."""
-
-    pass
+    """Final pipeline error surfaced to caller."""
 
 
-class StructuredOutputGenerator(Generic[T]):
-    """
-    Generic structured output generator for any Pydantic schema.
+@with_exponential_retry()
+def _run_structured_generation_once(prompt: str, schema: type[SchemaT]) -> SchemaT:
+    try:
+        response = model.generate_content(prompt)
+        raw_text = extract_response_text(response)
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        raise RetryableGeminiError(f"Gemini invocation failed: {exc}") from exc
 
-    Pipeline:
-    1. Generate response from Gemini
-    2. Retry on failures
-    3. Clean and parse JSON
-    4. Validate against Pydantic schema
-    5. Return validated object
-    """
-
-    def __init__(self, schema: Type[T]):
-        """Initialize generator with target schema."""
-        self.schema = schema
-        self.max_retries = RetryConfig.MAX_ATTEMPTS
-
-    def generate(self, prompt: str) -> T:
-        """
-        Generate and validate structured output from prompt.
-
-        Args:
-            prompt: Instruction prompt for Gemini
-
-        Returns:
-            Validated instance of target schema
-
-        Raises:
-            StructuredOutputError: If generation or validation fails
-        """
-        try:
-            response = self._generate_with_retry(prompt)
-            parsed_data = parse_gemini_response(response)
-            validated = self.schema(**parsed_data)
-            return validated
-
-        except ParsingError as e:
-            raise StructuredOutputError(f"Parsing failed: {str(e)}") from e
-        except ValidationError as e:
-            raise StructuredOutputError(f"Validation failed: {str(e)}") from e
-        except Exception as e:
-            raise StructuredOutputError(f"Unexpected error: {str(e)}") from e
-
-    @retry_on_malformed_json(
-        max_attempts=RetryConfig.MAX_ATTEMPTS,
-        initial_wait=RetryConfig.INITIAL_WAIT,
-        max_wait=RetryConfig.MAX_WAIT,
-    )
-    def _generate_with_retry(self, prompt: str) -> str:
-        """Call Gemini with retry on malformed JSON."""
-        try:
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            raise StructuredOutputError(f"Gemini API call failed: {str(e)}") from e
+    try:
+        payload = parse_gemini_response_to_dict(raw_text)
+        return schema.model_validate(payload)
+    except (GeminiParsingError, ValidationError) as exc:
+        raise RetryableParseError(str(exc)) from exc
 
 
-def generate_structured_output(
-    prompt: str,
-    schema: Type[T],
-) -> T:
-    """
-    Generate and validate structured output from Gemini.
+def generate_structured_output(prompt: str, schema: type[SchemaT]) -> SchemaT:
+    """Generate strict schema-validated output from a prompt."""
+    if not prompt or not prompt.strip():
+        raise StructuredOutputError("Prompt cannot be empty")
 
-    Args:
-        prompt: Instruction prompt for Gemini
-        schema: Pydantic model to validate against
-
-    Returns:
-        Validated instance of schema
-
-    Raises:
-        StructuredOutputError: If generation or validation fails
-    """
-    generator = StructuredOutputGenerator(schema)
-    return generator.generate(prompt)
+    try:
+        return _run_structured_generation_once(prompt=prompt.strip(), schema=schema)
+    except RetryError as exc:
+        raise StructuredOutputError(f"Structured output failed after retries: {exc}") from exc
+    except (RetryableGeminiError, RetryableParseError, TimeoutError) as exc:
+        raise StructuredOutputError(f"Structured output failed: {exc}") from exc

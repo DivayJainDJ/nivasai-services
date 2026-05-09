@@ -1,82 +1,69 @@
-"""
-Retry engine for resilient API calls and failure handling.
-"""
+"""Retry helpers for Gemini and parsing resiliency."""
 
-import json
-from typing import Callable, TypeVar, Optional
+from __future__ import annotations
+
+from typing import Any, Callable, TypeVar
+
 from tenacity import (
+    RetryError,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_result,
 )
 
 T = TypeVar("T")
 
 
-def retry_on_failure(
-    max_attempts: int = 3,
-    initial_wait: float = 1.0,
-    max_wait: float = 10.0,
-) -> Callable:
-    """Decorator for retrying with exponential backoff."""
-
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        @retry(
-            stop=stop_after_attempt(max_attempts),
-            wait=wait_exponential(
-                multiplier=initial_wait,
-                min=initial_wait,
-                max=max_wait,
-            ),
-            reraise=True,
-        )
-        def wrapper(*args, **kwargs) -> T:
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+class RetryableGeminiError(Exception):
+    """Transient model invocation failure."""
 
 
-def retry_on_malformed_json(
-    max_attempts: int = 3,
-    initial_wait: float = 1.0,
-    max_wait: float = 10.0,
-) -> Callable:
-    """Decorator for retrying on malformed JSON responses."""
-
-    def decorator(func: Callable[..., Optional[str]]) -> Callable[..., Optional[str]]:
-        def is_invalid_json(result):
-            if result is None or not isinstance(result, str):
-                return True
-            try:
-                json.loads(result)
-                return False
-            except (json.JSONDecodeError, ValueError):
-                return True
-
-        @retry(
-            stop=stop_after_attempt(max_attempts),
-            wait=wait_exponential(
-                multiplier=initial_wait,
-                min=initial_wait,
-                max=max_wait,
-            ),
-            retry=retry_if_result(is_invalid_json),
-            reraise=True,
-        )
-        def wrapper(*args, **kwargs) -> Optional[str]:
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+class RetryableParseError(Exception):
+    """Model responded but output could not be parsed/validated."""
 
 
 class RetryConfig:
-    """Configuration for retry behavior."""
+    """Default retry configuration for structured generation."""
 
-    MAX_ATTEMPTS = 3
-    INITIAL_WAIT = 1.0
-    MAX_WAIT = 10.0
+    MAX_ATTEMPTS = 4
+    INITIAL_WAIT_SECONDS = 1
+    MAX_WAIT_SECONDS = 8
+
+
+def with_exponential_retry(
+    *,
+    max_attempts: int = RetryConfig.MAX_ATTEMPTS,
+    initial_wait_seconds: int = RetryConfig.INITIAL_WAIT_SECONDS,
+    max_wait_seconds: int = RetryConfig.MAX_WAIT_SECONDS,
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Retry on transient Gemini and parse failures with exponential backoff."""
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @retry(
+            reraise=True,
+            stop=stop_after_attempt(max_attempts),
+            wait=wait_exponential(
+                multiplier=initial_wait_seconds,
+                min=initial_wait_seconds,
+                max=max_wait_seconds,
+            ),
+            retry=retry_if_exception_type(
+                (RetryableGeminiError, RetryableParseError, TimeoutError)
+            ),
+        )
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+__all__ = [
+    "RetryConfig",
+    "RetryError",
+    "RetryableGeminiError",
+    "RetryableParseError",
+    "with_exponential_retry",
+]
